@@ -1,5 +1,6 @@
 # INCLG: A Multi-task Image Inpainting Approach to Non-cleft Lip Generation
 =================================================================================
+
 ![Image text](https://github.com/ChrisChen1023/INCLG/edit/main/Overview.png)
 
 Patients with cleft lips usually need to undergo surgical treatment by a professional surgeon to improve nasolabial appearance. We propose a novel multi-task architecture to implement image inpainting and facial landmark prediction with interactive parameter sharing, the architecture is designed with Pytorch. Our system is trained with irregular masks so that the mask can fit different cleft lip types in testing. As cleft lip data is sensitive and not ready to be released, we only use cleft lip images for testing to protect patients privacy. 
