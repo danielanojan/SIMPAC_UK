@@ -5,6 +5,8 @@ Patients with cleft lips usually need to undergo surgical treatment by a profess
 
 Due to the sensitivity of patient privacy, we are not allowed to use patients images on Code Ocean. In this case, we only reproduce our results on non-cleft lips human face (CelebA).
 
+Our code is reproducible directely on: [Code Ocean](https://codeocean.com/capsule/1102688/tree)
+
 **Initialization**
 --------------------
 Python>=3.7
