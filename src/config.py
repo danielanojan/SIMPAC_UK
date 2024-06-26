@@ -32,7 +32,7 @@ DEFAULT_CONFIG = {
     'MASK': 3,                      # 1: random block, 2: half, 3: external, 4: (external, random block), 5: (external, random block, half)
     'NMS': 1,                       # 0: no non-max-suppression, 1: applies non-max-suppression on the external edges by multiplying by Canny
     'SEED': 10,                     # random seed
-    'GPU': [0],                     # list of gpu ids
+    'GPU': [1],                     # list of gpu ids
     'AUGMENTATION_TRAIN': 0,        # 1: train 0: false use augmentation to train landmark predictor
 
     'LR': 0.0001,                   # learning rate

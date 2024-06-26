@@ -129,7 +129,7 @@ class InpaintGenerator(BaseNetwork):
         f_e2 = self.encoder2(f_e1)
         f_e3 = self.encoder3(f_e2)
         x = self.middle(f_e3)
-        x, _ = self.auto_attn(x, f_e3, mask_quarter)
+        x, _ = self.auto_attn(x, f_e3, mask_quarter)   # why mask quarter is coming here
 
         ##### landmark branch, extraction step
         x_lmk = self.conv_afteratt_first(x) ## 256 -> 1280

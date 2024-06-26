@@ -12,7 +12,8 @@ from skimage.color import rgb2gray
 from .utils import create_mask
 import cv2
 from skimage.feature import canny
-
+import torchvision.transforms as transforms
+from random import randint
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, config, flist, landmark_flist, mask_flist, augment=True, training=True):
@@ -22,8 +23,10 @@ class Dataset(torch.utils.data.Dataset):
         self.training = training
 
         self.data = self.load_flist(flist)
-        self.mask_data = self.load_flist(mask_flist)
-        self.landmark_data = self.load_flist(landmark_flist)
+        self.mask_dir = mask_flist
+        self.keypoints_dir = landmark_flist
+        #self.mask_data = self.load_flist(mask_flist)
+        #self.landmark_data = self.load_flist_text(landmark_flist)
 
         self.input_size = config.INPUT_SIZE
         self.mask = config.MASK
@@ -48,29 +51,59 @@ class Dataset(torch.utils.data.Dataset):
 
         size = self.input_size
 
+        img_name = self.load_name(index)
+
+        keypoints_file_name = img_name.split('.')[0] + '_keypoints.txt'
+
+
+
+        keypoints_file_path = os.path.join(self.keypoints_dir, keypoints_file_name)
+        #print (mask_path)
+        #print (keypoints_file_path)
+
         # load image
         img = imread(self.data[index])
 
-        if self.config.MODEL == 2:
-            landmark = self.load_lmk([size, size], index, img.shape)
+        if self.config.MODEL == 2 and self.config.MODE == 1:
+            landmark = self.load_lmk([size, size], keypoints_file_path, img.shape)
 
         # resize/crop if needed
         if size != 0:
             img = self.resize(img, size, size, centerCrop=True)
 
-        # load mask
-        mask = self.load_mask(img, index)
+        # load img, landmark, mask for training
+        if self.mask == 6:
+            #mask is not a tensor in fixed mask reading
+            mask_path = os.path.join(self.mask_dir, img_name)
+            mask = self.load_mask(img, mask_path)
 
-        if self.config.MODEL == 2:
-            return self.to_tensor(img), torch.from_numpy(landmark).long(), self.to_tensor(mask)
+            if self.config.MODEL == 2 and self.config.MODE == 1:
+                return self.to_tensor(img), torch.from_numpy(landmark).long(), self.to_tensor(mask)
+
+            #load img and mask for testing
+            if self.config.MODEL == 2 and self.config.MODE == 2:
+                return self.to_tensor(img), [], self.to_tensor(mask)
+
+
+        elif self.mask == 8:
+            #mask is already a tensor in freeform mask
+            mask = self.load_mask(img, None)
+
+            if self.config.MODEL == 2 and self.config.MODE == 1:
+                return self.to_tensor(img), torch.from_numpy(landmark).long(), mask
+
+            # load img and mask for testing
+            if self.config.MODEL == 2 and self.config.MODE == 2:
+                return self.to_tensor(img), [], mask
 
 
 
-    def load_lmk(self, target_shape, index, size_before, center_crop = True):
-
+    def load_lmk(self, target_shape, keypoints_file_path, size_before, center_crop = True):
         imgh,imgw = target_shape[0:2]
-        landmarks = np.genfromtxt(self.landmark_data[index])
+
+        landmarks = np.genfromtxt(keypoints_file_path)
         landmarks = landmarks.reshape(self.config.LANDMARK_POINTS, 2)
+        #landmarks = (landmarks/4)
 
         if self.input_size != 0:
             if center_crop:
@@ -87,7 +120,7 @@ class Dataset(torch.utils.data.Dataset):
         return landmarks
 
 
-    def load_mask(self, img, index):
+    def load_mask(self, img, mask_path):
         imgh, imgw = img.shape[0:2]
         mask_type = self.mask
 
@@ -113,18 +146,19 @@ class Dataset(torch.utils.data.Dataset):
 
         # external
         if mask_type == 3:
-            mask_index = random.randint(0, len(self.mask_data) - 1)
-            mask = imread(self.mask_data[mask_index])
+            #mask_index = random.randint(0, len(self.mask_data) - 1)
+            mask = imread(mask_path)
             mask = self.resize(mask, imgh, imgw)
             mask = (mask > 0).astype(np.uint8) * 255
             return mask
 
         # test mode: load mask non random
         if mask_type == 6:
-            mask = imread(self.mask_data[index%len(self.mask_data)])
+            mask = imread(mask_path)
             mask = self.resize(mask, imgh, imgw, centerCrop=False)
-            mask = rgb2gray(mask)
-            mask = (mask > 100).astype(np.uint8) * 255
+
+            mask =  cv2.cvtColor(mask, cv2.COLOR_RGB2GRAY)
+            mask = (mask > 50).astype(np.uint8) * 255
 
             return mask
         # random mask
@@ -134,9 +168,94 @@ class Dataset(torch.utils.data.Dataset):
                 mask = self.resize(mask, imgh, imgw, centerCrop=False)
                 return mask
 
+        if mask_type ==8:
+            random_num =randint(0, 1)
+            if random_num == 0:
+                mask = self.random_irregular_mask(img)
+            elif random_num == 1:
+                mask = self.random_freefrom_mask(img)
+            return mask
 
+    def random_irregular_mask(self, img):
+        img = self.to_tensor(img)
+        """Generates a random irregular mask with lines, circles and elipses"""
+        transform = transforms.Compose([transforms.ToTensor()])
+        # mask = torch.ones_like(img)
+        size = img.size()
+        mask = torch.ones(1, size[1], size[2])
+        img = np.zeros((size[1], size[2], 1), np.uint8)
+
+        # Set size scale
+        max_width = 20
+        if size[1] < 64 or size[2] < 64:
+            raise Exception("Width and Height of mask must be at least 64!")
+
+        number = random.randint(16, 64)
+        for _ in range(number):
+            model = random.random()
+            if model < 0.6:
+                # Draw random lines
+                x1, x2 = randint(1, size[1]), randint(1, size[1])
+                y1, y2 = randint(1, size[2]), randint(1, size[2])
+                thickness = randint(4, max_width)
+                cv2.line(img, (x1, y1), (x2, y2), (1, 1, 1), thickness)
+
+            elif model > 0.6 and model < 0.8:
+                # Draw random circles
+                x1, y1 = randint(1, size[1]), randint(1, size[2])
+                radius = randint(4, max_width)
+                cv2.circle(img, (x1, y1), radius, (1, 1, 1), -1)
+
+            elif model > 0.8:
+                # Draw random ellipses
+                x1, y1 = randint(1, size[1]), randint(1, size[2])
+                s1, s2 = randint(1, size[1]), randint(1, size[2])
+                a1, a2, a3 = randint(3, 180), randint(3, 180), randint(3, 180)
+                thickness = randint(4, max_width)
+                cv2.ellipse(img, (x1, y1), (s1, s2), a1, a2, a3, (1, 1, 1), thickness)
+
+        img = img.reshape(size[2], size[1])
+        img = Image.fromarray(img * 255)
+        #img.save('testg.jpg')
+        img_mask = transform(img)
+        #ask[0, :, :] = img_mask < 1
+
+        return img_mask
+
+    def random_freefrom_mask(self, img, mv=5, ma=4.0, ml=40, mbw=10):
+        transform = transforms.Compose([transforms.ToTensor()])
+
+        img = self.to_tensor(img)
+        size = img.size()
+        mask = torch.ones(1, size[1], size[2])
+        img = np.zeros((size[1], size[2], 1), np.uint8)
+        num_v = 12 + np.random.randint(mv)  # tf.random_uniform([], minval=0, maxval=config.MAXVERTEX, dtype=tf.int32)
+
+        for i in range(num_v):
+            start_x = np.random.randint(size[1])
+            start_y = np.random.randint(size[2])
+            for j in range(1 + np.random.randint(5)):
+                angle = 0.01 + np.random.randint(ma)
+                if i % 2 == 0:
+                    angle = 2 * 3.1415926 - angle
+                length = 10 + np.random.randint(ml)
+                brush_w = 10 + np.random.randint(mbw)
+                end_x = (start_x + length * np.sin(angle)).astype(np.int32)
+                end_y = (start_y + length * np.cos(angle)).astype(np.int32)
+
+                cv2.line(img, (start_y, start_x), (end_y, end_x), 1.0, brush_w)
+                start_x, start_y = end_x, end_y
+
+        img = img.reshape(size[2], size[1])
+        img = Image.fromarray(img * 255)
+
+        img_mask = transform(img)
+        #mask[0, :, :] = img_mask < 1
+
+        return img_mask
     def to_tensor(self, img):
         img = Image.fromarray(img)
+
         img_t = F.to_tensor(img).float()
         return img_t
 
@@ -160,7 +279,7 @@ class Dataset(torch.utils.data.Dataset):
         # flist: image file path, image directory path, text file flist path
         if isinstance(flist, str):
             if os.path.isdir(flist):
-                flist = list(glob.glob(flist + '/*.jpg')) + list(glob.glob(flist + '/*.png'))
+                flist = list(glob.glob(flist + '/*.jpg')) + list(glob.glob(flist + '/*.png')) + list(glob.glob(flist + '/*.jpeg'))
                 flist.sort()
                 return flist
 
@@ -170,7 +289,27 @@ class Dataset(torch.utils.data.Dataset):
                 except Exception as e:
                     print(e)
                     return [flist]
-        
+
+        return []
+
+    def load_flist_text(self, flist):
+        if isinstance(flist, list):
+            return flist
+
+        # flist: image file path, image directory path, text file flist path
+        if isinstance(flist, str):
+            if os.path.isdir(flist):
+                flist = list(glob.glob(flist + '/*.txt'))
+                flist.sort()
+                return flist
+
+            if os.path.isfile(flist):
+                try:
+                    return np.genfromtxt(flist, dtype=np.str, encoding='utf-8')
+                except Exception as e:
+                    print(e)
+                    return [flist]
+
         return []
 
     def create_iterator(self, batch_size):

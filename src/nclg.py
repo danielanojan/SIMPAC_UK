@@ -10,7 +10,9 @@ from .utils import Progbar, create_dir, stitch_images, imsave
 from .metrics import PSNR
 from cv2 import circle
 from PIL import Image
+import cv2
 import optuna
+from torchvision.utils import save_image
 
 '''
 This repo is modified basing on Edge-Connect
@@ -23,11 +25,16 @@ class NCLG():
 
         if config.MODEL == 2:
             model_name = 'inpaint'
+        if config.MODEL == 3:
+            model_name = 'joint'
+        if config.MODEL == 1:
+            model_name = "landmark"
 
+        self.experiment_name = config.EXPERIMENT
 
         self.debug = False
         self.model_name = model_name
-
+        #here model is transfered to gpu
         self.inpaint_model = InpaintingModel(config).to(config.DEVICE)
 
 
@@ -42,6 +49,18 @@ class NCLG():
                 self.val_dataset = Dataset(config, config.VAL_INPAINT_IMAGE_FLIST, config.VAL_INPAINT_LANDMARK_FLIST,
                                            config.TEST_MASK_FLIST, augment=True, training=True)
                 self.sample_iterator = self.val_dataset.create_iterator(config.SAMPLE_SIZE)
+
+                self.samples_path = os.path.join(config.PATH, 'samples')
+
+                if not os.path.exists(self.samples_path):
+                    os.makedirs(self.samples_path)
+
+                self.results_path = os.path.join(config.PATH, 'results')
+
+                if config.DEBUG is not None and config.DEBUG != 0:
+                    self.debug = True
+
+                self.log_file = os.path.join(config.PATH, 'log_' + model_name + '.dat')
         #optuna mode
         elif self.config.MODE == 5:
 
@@ -60,17 +79,14 @@ class NCLG():
                 self.test_dataset = Dataset(config, config.TEST_INPAINT_IMAGE_FLIST, config.TEST_INPAINT_LANDMARK_FLIST, config.TEST_MASK_FLIST,
                                             augment=False, training=False)
 
+                self.results_path = os.path.join(config.RESULTS, config.EXPERIMENT, config.ITERATION)
 
-        self.samples_path = os.path.join(config.PATH, 'samples')
-        self.results_path = os.path.join('/results')
+                if not os.path.exists(self.results_path):
+                    os.makedirs(self.results_path)
 
-        if config.RESULTS is not None:
-            self.results_path = os.path.join(config.RESULTS)
+                if config.DEBUG is not None and config.DEBUG != 0:
+                    self.debug = True
 
-        if config.DEBUG is not None and config.DEBUG != 0:
-            self.debug = True
-
-        self.log_file = os.path.join(config.PATH, 'log_' + model_name + '.dat')
 
     def load(self):
         if self.config.MODEL == 2:
@@ -93,6 +109,7 @@ class NCLG():
 
 
         epoch = 0
+        itration = 0
         keep_training = True
         model = self.config.MODEL
         max_iteration = int(float((self.config.MAX_ITERS)))
@@ -105,7 +122,7 @@ class NCLG():
 
 
             for items in train_loader:
-
+                itration +=1
                 self.inpaint_model.train()
 
                 if model == 2:
@@ -143,9 +160,11 @@ class NCLG():
 
                 progbar.add(len(images), values=logs if self.config.VERBOSE else [x for x in logs if not x[0].startswith('l_')])
 
+                create_dir(self.results_path)
+                #create_dir(os.path.join(self.results_path, self.experiment_name))
+
                 ## visialization
                 if iteration % 10 == 0:
-                    create_dir(self.results_path)
                     inputs = (images * (1 - masks))
                     images_joint = stitch_images(
                         self.postprocess(images),
@@ -155,12 +174,19 @@ class NCLG():
                         img_per_row=1
                     )
 
-                    path_masked = os.path.join(self.results_path,self.model_name,'masked')
-                    path_result = os.path.join(self.results_path, self.model_name,'result')
-                    path_joint = os.path.join(self.results_path,self.model_name,'joint')
-                    path_landmark_mask = os.path.join(self.results_path, self.model_name, 'landmark_mask')
-                    path_landmark_gt = os.path.join(self.results_path, self.model_name, 'landmark_gt')
-                    name = self.train_dataset.load_name(epoch-1)[:-4]+'.png'
+                    #path_masked = os.path.join(self.results_path,self.experiment_name,'masked')
+                    #path_result = os.path.join(self.results_path, self.experiment_name,'result')
+                    #path_joint = os.path.join(self.results_path,self.experiment_name,'joint')
+                    #path_landmark_mask = os.path.join(self.results_path, self.experiment_name, 'landmark_mask')
+                    #path_landmark_gt = os.path.join(self.results_path, self.experiment_name, 'landmark_gt')
+                    #name = self.train_dataset.load_name(epoch-1)[:-4]+'.png'
+
+                    path_masked = os.path.join(self.results_path,  'masked')
+                    path_result = os.path.join(self.results_path,  'result')
+                    path_joint = os.path.join(self.results_path,  'joint')
+                    path_landmark_mask = os.path.join(self.results_path,  'landmark_mask')
+                    path_landmark_gt = os.path.join(self.results_path, 'landmark_gt')
+                    name = self.train_dataset.load_name(epoch - 1)[:-4] + '.png'
 
                     create_dir(path_masked)
                     create_dir(path_result)
@@ -212,8 +238,20 @@ class NCLG():
                     print('\nstart eval...\n')
                     self.eval()
                 # save model at checkpoints
+
                 if self.config.SAVE_INTERVAL and iteration % self.config.SAVE_INTERVAL == 0:
                     self.save()
+
+            name_new = name[:-4]+ '_epoch_' + str(itration) + '.png'
+
+            landmark_mask_image.save(os.path.join(path_landmark_mask, name_new))
+            landmark_gt.save(os.path.join(path_landmark_gt, name_new))
+
+            images_joint.save(os.path.join(path_joint, name_new))
+            imsave(masked_images, os.path.join(path_masked, name_new))
+            imsave(images_result, os.path.join(path_result, name_new))
+
+
         print('\nEnd training....')
 
     def test(self):
@@ -229,15 +267,17 @@ class NCLG():
         print('here')
         index = 0
         for items in test_loader:
-            images, landmarks, masks = self.cuda(*items)
+            #images, _ , masks = self.cuda(*items)
+            images, masks = self.cuda(items[0],items[2])
             index += 1
 
             if model == 2:
-                landmarks[landmarks >= self.config.INPUT_SIZE-1] = self.config.INPUT_SIZE-1
-                landmarks[landmarks < 0] = 0
+                #landmarks[landmarks >= self.config.INPUT_SIZE-1] = self.config.INPUT_SIZE-1
+                #landmarks[landmarks < 0] = 0
+                #here you should see what is the input - what is (1- mask) why its multiplied by images.
 
                 inputs = (images * (1 - masks))
-
+                inputsk = (inputs.squeeze().cpu().detach().numpy().transpose(1, 2, 0) * 255).astype('uint8')
                 outputs_img, outputs_lmk = self.inpaint_model(images, masks)
                 outputs_lmk *= self.config.INPUT_SIZE
                 outputs_lmk = outputs_lmk.reshape((-1, self.config.LANDMARK_POINTS, 2))
@@ -252,12 +292,12 @@ class NCLG():
                     img_per_row=1
                 )
 
-                path_masked = os.path.join(self.results_path,self.model_name,'masked')
-                path_result = os.path.join(self.results_path, self.model_name,'result')
-                path_joint = os.path.join(self.results_path,self.model_name,'joint')
+                path_masked = os.path.join(self.results_path,'masked')
+                path_result = os.path.join(self.results_path,'result')
+                path_joint = os.path.join(self.results_path, 'joint')
 
-                path_landmark_output = os.path.join(self.results_path, self.model_name, 'landmark_output')
-                path_landmark_only = os.path.join(self.results_path, self.model_name, 'landmark_only')
+                path_landmark_output = os.path.join(self.results_path, 'landmark_output')
+                path_landmark_only = os.path.join(self.results_path, 'landmark_only')
 
                 name = self.test_dataset.load_name(index-1)[:-4]+'.png'
 

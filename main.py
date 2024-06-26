@@ -33,7 +33,7 @@ def main(mode=None):
         print('Cuda is unavailable, use cpu')
         config.DEVICE = torch.device("cpu")
 
-
+    #config.DEVICE = torch.device("cpu")
 
     # set cv2 running threads to 1 (prevents deadlocks with pytorch dataloader)
     cv2.setNumThreads(0)
@@ -44,8 +44,6 @@ def main(mode=None):
     torch.cuda.manual_seed_all(config.SEED)
     np.random.seed(config.SEED)
     random.seed(config.SEED)
-
-
 
     # build the model and initialize
     model = NCLG(config)
@@ -92,25 +90,49 @@ def load_config(mode=None):
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--path', '--checkpoints', type=str, default='/code/NCLG-MT-master/checkpoints',
+    parser.add_argument('--path', type=str, default='/mnt/recsys/daniel/gan_inpainting/SIMPAC-2022-272/experiments/',
                         help='model checkpoints path (default: ./checkpoints)')
 
     parser.add_argument('--model', type=int, default='2', choices=[1, 2, 3],
                         help='1: landmark prediction model, 2: inpaint model, 3: joint model')
 
+    parser.add_argument('--mask_type', type=int, default='2', choices=[1, 2],
+                        help='1: Fixed_mask, 2: Random Mask')
     # test mode
-    if mode == 2:
-        parser.add_argument('--input', type=str, help='path to the input images directory or an input image')
-        parser.add_argument('--mask', type=str, help='path to the masks directory or a mask file')
-        parser.add_argument('--landmark', type=str, help='path to the landmarks directory or a landmark file')
-        parser.add_argument('--output', type=str, help='path to the output directory')
+    if mode == 2 or mode == 1:
+        parser.add_argument('--experiment_name', type=str, default='celebAHQ-pretrained/', help='experiment name')
 
+        #parser.add_argument('--input', type=str, default = '/mnt/recsys/daniel/datasets/US_surgeons_cleft/nosemask256/img', help='path to the input images directory or an input image')
+        #parser.add_argument('--mask', type=str,  default= '/mnt/recsys/daniel/datasets/US_surgeons_cleft/nosemask256/black_mask', help='path to the masks directory or a mask file')
+        #parser.add_argument('--landmark', type=str, default = '/mnt/recsys/daniel/datasets/US_surgeons_cleft/nosemask256/', help='path to the landmarks directory or a landmark file')
+
+        parser.add_argument('--input', type=str,
+                            default='/mnt/recsys/daniel/evaluation_miccai/present_imgs2/img',
+                            help='path to the input images directory or an input image')
+        parser.add_argument('--mask', type=str,
+                            default='/mnt/recsys/daniel/evaluation_miccai/present_imgs2/mask',
+                            help='path to the masks directory or a mask file')
+        parser.add_argument('--landmark', type=str,
+                            default='/mnt/recsys/daniel/evaluation_miccai/present_imgs2/keypoints',
+                            help='path to the landmarks directory or a landmark file')
+
+    if mode == 2:
+        #parser.add_argument('--landmark', type=str,
+        #                    default='',
+        #                    help='path to the landmarks directory or a landmark file')
+        parser.add_argument('--iteration', type=str, default = '100')
+        parser.add_argument('--test_filelist', type=str, default='')
+        parser.add_argument('--output_dir', type=str, default = '/mnt/recsys/daniel/evaluation_miccai/results_imgs_web2/UK_model_pretrained')
+        #parser.add_argument('--output_dir', type=str,
+        #                   default='/mnt/recsys/daniel/evaluation_miccai/results_images/UK_model/celebA_pretrained/lips_mask')
     args = parser.parse_args()
-    config_path = os.path.join(args.path, 'config.yml')
+    experiment_path = os.path.join(args.path, args.experiment_name)
+
+    config_path = os.path.join(experiment_path, 'config.yml')
 
     # create checkpoints path if does't exist
-    if not os.path.exists(args.path):
-        os.makedirs(args.path)
+    if not os.path.exists(experiment_path):
+        os.makedirs(experiment_path)
 
     # copy config template if does't exist
     if not os.path.exists(config_path):
@@ -118,7 +140,6 @@ def load_config(mode=None):
 
     # load config file
     config = Config(config_path)
-    print(config_path)
 
     # train mode
     if mode == 1:
@@ -126,22 +147,58 @@ def load_config(mode=None):
         if args.model:
             config.MODEL = args.model
 
+        if args.input is not None:
+            config.TRAIN_INPAINT_IMAGE_FLIST = args.input
+
+        if ((args.mask is not None) and (args.mask_type==1)):
+            config.TRAIN_MASK_FLIST = args.mask
+
+        if args.landmark is not None:
+            config.TRAIN_INPAINT_LANDMARK_FLIST = args.landmark
+
+
+        config.RESULTS = experiment_path
+
+        if args.experiment_name is not None:
+            config.EXPERIMENT = args.experiment_name
+
+        if args.experiment_name is not None:
+            config.EXPERIMENT_PATH = experiment_path
+
+        if args.mask_type == 1:
+            config.MASK = 6
+        elif args.mask_type == 2:
+            config.MASK = 8
+            config.TRAIN_MASK_FLIST = None
     # test mode
     elif mode == 2:
         config.MODE = 2
-        config.MODEL = args.model if args.model is not None else 3
 
+        #config.TEST_INPAINT_IMAGE_FLIST =
+
+        config.MODEL = args.model if args.model is not None else 3
+        config.PRETRAINED_MODEL = 'InpaintingModel' + args.iteration
         if args.input is not None:
             config.TEST_INPAINT_IMAGE_FLIST = args.input
 
+        config.ITERATION = args.iteration
         if args.mask is not None:
             config.TEST_MASK_FLIST = args.mask
 
         if args.landmark is not None:
             config.TEST_INPAINT_LANDMARK_FLIST = args.landmark
 
-        if args.output is not None:
-            config.RESULTS = args.output
+        #if args.output is not None:
+        #    config.RESULTS = args.output
+        #results_dir = os.path.join(args.output_dir, args.iteration)
+        #if not os.path.exists(results_dir):
+        #    os.makedirs(results_dir)
+
+
+        config.RESULTS = args.output_dir
+
+        if args.experiment_name is not None:
+            config.EXPERIMENT = args.experiment_name
 
     # eval mode
     elif mode == 3:

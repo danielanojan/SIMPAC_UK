@@ -1,4 +1,5 @@
 import os
+import wandb
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -16,10 +17,16 @@ class BaseModel(nn.Module):
         self.name = name
         self.config = config
         self.iteration = 0
-
-        self.gen_weights_path = os.path.join(config.PATH, name + '_gen.pth')
-        self.dis_weights_path = os.path.join(config.PATH, name + '_dis.pth')
-
+        self.epoch = 0
+        self.base_path = config.PATH
+        self.exp_name = config.EXPERIMENT
+        self.checkpoints_path = os.path.join(config.PATH, 'checkpoints')
+        if config.PRETRAINED_MODEL:
+            self.gen_weights_path = os.path.join(self.checkpoints_path, config.PRETRAINED_MODEL + '_gen.pth')
+            self.dis_weights_path = os.path.join(self.checkpoints_path, config.PRETRAINED_MODEL + '_dis.pth')
+        else:
+            self.gen_weights_path = os.path.join(self.checkpoints_path, name + '_gen.pth')
+            self.dis_weights_path = os.path.join(self.checkpoints_path, name + '_dis.pth')
     def load(self):
         if os.path.exists(self.gen_weights_path):
             print('Loading %s generator...' % self.name)
@@ -44,6 +51,10 @@ class BaseModel(nn.Module):
             self.discriminator.load_state_dict(data['discriminator'])
 
     def save(self):
+
+        self.gen_weights_path = os.path.join(self.checkpoints_path, self.name +str(self.iteration) + '_gen.pth')
+        self.dis_weights_path = os.path.join(self.checkpoints_path, self.name + str(self.iteration) + '_dis.pth')
+
         print('\nsaving %s...\n' % self.name)
         torch.save({
             'iteration': self.iteration,
@@ -59,6 +70,12 @@ class BaseModel(nn.Module):
 class InpaintingModel(BaseModel):
     def __init__(self, config):
         super(InpaintingModel, self).__init__('InpaintingModel', config)
+
+        wandb.init(project="SIMPAC-2022-UK Model", entity="danielanojan")
+        wandb.config = {"learning_rate": config.LR, "Dis/Gen LR Ratio  ":config.D2G_LR, "L1_loss_weight": config.L1_LOSS_WEIGHT, "Style Loss Weight": config.STYLE_LOSS_WEIGHT,
+                        "Content Loss Weight":config.CONTENT_LOSS_WEIGHT, "Inpaint Adv Loss Weight":config.INPAINT_ADV_LOSS_WEIGHT,
+                        "TV Loss Weight":config.TV_LOSS_WEIGHT, "LMK Loss Weight":config.LMK_LOSS_WEIGHT, "batch_size": config.BATCH_SIZE}
+
 
         generator = InpaintGenerator()
         discriminator = Discriminator(in_channels=3, use_sigmoid=config.GAN_LOSS != 'hinge')
@@ -168,7 +185,10 @@ class InpaintingModel(BaseModel):
             ("gLoss",gen_loss.item()),
             ("dLoss",dis_loss.item())
         ]
-
+        if self.iteration % 1000 == 0:
+            wandb.log({"Discriminator Loss": dis_loss, "Training loss": gen_loss, "Generator Gan loss": gen_gan_loss, "Generator L1 Loss": gen_l1_loss,
+                       "Gnerator Content Loss":gen_content_loss, "Generator Style Loss": gen_style_loss, "TV Loss":tv_loss, "LMK Loss":  lmk_loss})
+            wandb.watch(self.generator)
         return outputs_img, outputs_lmk, gen_loss, dis_loss, logs, gen_gan_loss, gen_l1_loss, gen_content_loss, gen_style_loss, tv_loss, lmk_loss
 
 
